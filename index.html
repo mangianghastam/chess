@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+   <meta charset="UTF-8" />
+   <title>Cờ vua</title>
+   <style>
+      body {
+         margin: 0;
+         min-height: 100vh;
+         display: flex;
+         justify-content: center;
+         align-items: center;
+         background: #111;
+         font-family: system-ui, sans-serif;
+         color: #eee;
+      }
+
+      .board {
+         display: grid;
+         grid-template-columns: repeat(8, 64px);
+         grid-template-rows: repeat(8, 64px);
+         border: 4px solid #888;
+      }
+
+      .cell {
+         width: 64px;
+         height: 64px;
+         display: flex;
+         justify-content: center;
+         align-items: center;
+         font-size: 40px;
+         cursor: pointer;
+         user-select: none;
+      }
+
+      .white {
+         background: #f0d9b5;
+         color: #000;
+      }
+
+      .black {
+         background: #b58863;
+         color: #000;
+      }
+
+      .selected {
+         outline: 3px solid red;
+      }
+
+      .move {
+         outline: 3px solid green;
+      }
+
+      .check {
+         box-shadow: inset 0 0 0 4px red;
+      }
+
+      .undo button {
+         padding: 8px 14px;
+         font-size: 16px;
+         cursor: pointer;
+         margin-left: 30px;
+      }
+   </style>
+</head>
+
+<body>
+   <div class="game">
+      <div class="board" id="board"></div>
+      
+      <!-- <button id="undoBtn">⟲ Đi lại</button> -->
+   </div>
+   <div class="undo">
+      <button onclick="undoMove()">⏪ Đi lại</button>
+   </div>
+
+
+   <script>
+      // ================== KHỞI TẠO ==================
+      const boardEl = document.getElementById('board');
+      let promotionPending = null;
+
+
+      const pieces = {
+         r: '♜', n: '♞', b: '♝', q: '♛', k: '♚', p: '♟',
+         R: '♖', N: '♘', B: '♗', Q: '♕', K: '♔', P: '♙'
+      };
+
+      let board = [
+         ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
+         ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
+         ['.', '.', '.', '.', '.', '.', '.', '.'],
+         ['.', '.', '.', '.', '.', '.', '.', '.'],
+         ['.', '.', '.', '.', '.', '.', '.', '.'],
+         ['.', '.', '.', '.', '.', '.', '.', '.'],
+         ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
+         ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
+      ];
+
+      let turn = 'white'; // white | black
+      let selected = null;
+      let legalMoves = [];
+      let castlingRights = {
+         white: { king: true, queen: true },
+         black: { king: true, queen: true }
+      };
+      let enPassantTarget = null;
+      let checkedKing = null; // {x, y} hoặc null
+      let history = [];
+
+      // function deepCopy(board) {
+      //    return board.map(row => row.slice());
+      // }
+
+      // // history.push({
+      // //    board: deepCopy(board),
+      // //    turn: turn,
+      // //    checkedKing: checkedKing
+      // // });
+
+      // function undoMove() {
+      //    if (history.length === 0) return;
+
+      //    const last = history.pop();
+      //    board = last.board;
+      //    turn = last.turn;
+      //    checkedKing = last.checkedKing;
+
+      //    selected = null;
+      //    legalMoves = [];
+      //    drawBoard();
+      // }
+
+      // document.getElementById("undoBtn").onclick = undoMove;
+
+      function saveState() {
+         history.push({
+            board: board.map(row => [...row]),
+            turn,
+            castlingRights: JSON.parse(JSON.stringify(castlingRights)),
+            enPassantTarget: enPassantTarget ? { ...enPassantTarget } : null,
+            promotionPending
+         });
+      }
+
+      function undoMove() {
+         if (history.length === 0) return;
+
+         const prev = history.pop();
+
+         board = prev.board.map(row => [...row]);
+         turn = prev.turn;
+         castlingRights = JSON.parse(JSON.stringify(prev.castlingRights));
+         enPassantTarget = prev.enPassantTarget;
+         promotionPending = prev.promotionPending;
+
+         selected = null;
+         legalMoves = [];
+         drawBoard();
+      }
+
+
+      // ================== RENDER ==================
+      function drawBoard() {
+         boardEl.innerHTML = '';
+         for (let y = 0; y < 8; y++) {
+            for (let x = 0; x < 8; x++) {
+               const cell = document.createElement('div');
+               cell.className = 'cell ' + ((x + y) % 2 === 0 ? 'white' : 'black');
+               const p = board[y][x];
+               if (p !== '.') cell.textContent = pieces[p];
+
+               if (selected && selected.x === x && selected.y === y)
+                  cell.classList.add('selected');
+
+               if (legalMoves.some(m => m.x === x && m.y === y))
+                  cell.classList.add('move');
+
+               if (
+                  checkedKing &&
+                  checkedKing.x === x &&
+                  checkedKing.y === y
+               ) {
+                  cell.classList.add('check');
+               }
+
+               cell.onclick = () => onCellClick(x, y);
+               boardEl.appendChild(cell);
+            }
+         }
+         showPromotionMenu();
+      }
+
+      function showPromotionMenu() {
+         if (!promotionPending) return;
+
+         const choices = promotionPending.color === 'white'
+            ? ['Q', 'R', 'B', 'N']
+            : ['q', 'r', 'b', 'n'];
+
+         const menu = document.createElement('div');
+         menu.style.position = 'fixed';
+         menu.style.top = '50%';
+         menu.style.left = '50%';
+         menu.style.transform = 'translate(-50%,-50%)';
+         menu.style.background = '#222';
+         menu.style.padding = '16px';
+         menu.style.border = '2px solid #aaa';
+         menu.style.display = 'flex';
+         menu.style.gap = '10px';
+         menu.style.zIndex = 999;
+
+         choices.forEach(c => {
+            const btn = document.createElement('div');
+            btn.textContent = pieces[c];
+            btn.style.fontSize = '48px';
+            btn.style.cursor = 'pointer';
+            btn.onclick = () => {
+               board[promotionPending.y][promotionPending.x] = c;
+               promotionPending = null;
+               document.body.removeChild(menu);
+               turn = turn === 'white' ? 'black' : 'white';
+               drawBoard();
+            };
+            menu.appendChild(btn);
+         });
+
+         document.body.appendChild(menu);
+      }
+
+      // ================== LOGIC CLICK ==================
+      function onCellClick(x, y) {
+         if (promotionPending) return;
+
+         const piece = board[y][x];
+
+         if (selected) {
+            if (legalMoves.some(m => m.x === x && m.y === y)) {
+
+               movePiece(selected.x, selected.y, x, y);
+
+               // ====== NẾU KHÔNG PHONG QUÂN ======
+               if (!promotionPending) {
+                  turn = turn === 'white' ? 'black' : 'white';
+
+                  if (isInsufficientMaterial()) {
+                     alert("HÒA CỜ! (Không đủ quân để chiếu hết)");
+                     selected = null;
+                     legalMoves = [];
+                     drawBoard();
+                     return;
+                  }
+
+                  // 🔔 BÁO CHIẾU
+                  checkedKing = null;
+
+                  if (isKingInCheck(turn)) {
+                     checkedKing = findKing(turn);
+                  }
+
+
+                  // kiểm tra chiếu hết
+                  if (isCheckmate(turn)) {
+                     alert("CHIẾU HẾT! " + (turn === 'white' ? 'ĐEN' : 'TRẮNG') + " THẮNG");
+                     selected = null;
+                     legalMoves = [];
+                     drawBoard();
+                     return;
+                  }
+                  if (isStalemate(turn)) {
+                     alert("HÒA CỜ! (Stalemate)");
+                     selected = null;
+                     legalMoves = [];
+                     drawBoard();
+                     return;
+                  }
+               }
+            }
+
+            selected = null;
+            legalMoves = [];
+         }
+         else if (piece !== '.' && isOwnPiece(piece)) {
+            selected = { x, y };
+            legalMoves = getSafeMoves(x, y);
+         }
+
+         drawBoard();
+      }
+
+
+      function isOwnPiece(p) {
+         return turn === 'white' ? p === p.toUpperCase() : p === p.toLowerCase();
+      }
+      function checkPromotion(x, y) {
+         const p = board[y][x];
+         if (p === 'P' && y === 0) board[y][x] = 'Q';
+         if (p === 'p' && y === 7) board[y][x] = 'q';
+      }
+
+      // ================== DI CHUYỂN ==================
+      function movePiece(x1, y1, x2, y2) {
+         const p = board[y1][x1];
+         const isEnPassant =
+            p.toLowerCase() === 'p' &&
+            enPassantTarget &&
+            x2 === enPassantTarget.x &&
+            y2 === enPassantTarget.y;
+
+         saveState(); // 🔥 CỰC QUAN TRỌNG
+
+         const piece = board[y1][x1];
+
+         if (p.toLowerCase() === 'p' && Math.abs(y2 - y1) === 2) {
+            enPassantTarget = { x: x2, y: (y1 + y2) / 2 };
+         }
+
+         // cập nhật quyền nhập thành
+         if (p === 'K') castlingRights.white.king = castlingRights.white.queen = false;
+         if (p === 'k') castlingRights.black.king = castlingRights.black.queen = false;
+
+         if (p === 'R' && y1 === 7 && x1 === 0) castlingRights.white.queen = false;
+         if (p === 'R' && y1 === 7 && x1 === 7) castlingRights.white.king = false;
+
+         if (p === 'r' && y1 === 0 && x1 === 0) castlingRights.black.queen = false;
+         if (p === 'r' && y1 === 0 && x1 === 7) castlingRights.black.king = false;
+
+         // di chuyển
+         board[y2][x2] = p;
+         board[y1][x1] = '.';
+
+         // ===== XỬ LÝ NHẬP THÀNH =====
+         if (p === 'K' && Math.abs(x2 - x1) === 2) {
+            if (x2 === 6) { // cánh vua
+               board[7][5] = 'R';
+               board[7][7] = '.';
+            } else { // cánh hậu
+               board[7][3] = 'R';
+               board[7][0] = '.';
+            }
+         }
+
+         if (p === 'k' && Math.abs(x2 - x1) === 2) {
+            if (x2 === 6) {
+               board[0][5] = 'r';
+               board[0][7] = '.';
+            } else {
+               board[0][3] = 'r';
+               board[0][0] = '.';
+            }
+         }
+
+         // kiểm tra phong cấp
+         if (p === 'P' && y2 === 0) {
+            promotionPending = { x: x2, y: y2, color: 'white' };
+         }
+         else if (p === 'p' && y2 === 7) {
+            promotionPending = { x: x2, y: y2, color: 'black' };
+         }
+
+         // bắt tốt qua đường
+         if (isEnPassant) {
+            const dir = p === 'P' ? 1 : -1;
+            board[y2 + dir][x2] = '.';
+         }
+
+         enPassantTarget = null;
+
+         // chỉ tạo mới nếu tốt đi 2 ô
+         if (p.toLowerCase() === 'p' && Math.abs(y2 - y1) === 2) {
+            enPassantTarget = {
+               x: x1,
+               y: (y1 + y2) / 2
+            };
+         }
+      }
+
+      // ================== LUẬT ĐI CƠ BẢN ==================
+      function findKing(color) {
+         for (let y = 0; y < 8; y++) {
+            for (let x = 0; x < 8; x++) {
+               const p = board[y][x];
+               if (color === 'white' && p === 'K') return { x, y };
+               if (color === 'black' && p === 'k') return { x, y };
+            }
+         }
+         return null;
+      }
+
+
+      function isKingInCheck(color) {
+         const king = findKing(color);
+         if (!king) return false;
+
+         for (let y = 0; y < 8; y++) {
+            for (let x = 0; x < 8; x++) {
+               const p = board[y][x];
+               if (p === '.') continue;
+
+               // quân đối phương
+               if (
+                  (color === 'white' && p === p.toLowerCase()) ||
+                  (color === 'black' && p === p.toUpperCase())
+               ) {
+                  const moves = getLegalMoves(x, y);
+                  if (moves.some(m => m.x === king.x && m.y === king.y)) {
+                     return true;
+                  }
+               }
+            }
+         }
+         return false;
+      }
+
+
+      function getLegalMoves(x, y) {
+         const p = board[y][x];
+         const moves = [];
+         const dir = p === p.toUpperCase() ? -1 : 1; // hướng tốt
+
+         switch (p.toLowerCase()) {
+            case 'p': // TỐT
+               // đi 1 ô
+               if (inBoard(x, y + dir) && board[y + dir][x] === '') {
+                  // (không dùng ==='' nên bỏ, sửa lại dưới)
+               }
+               if (inBoard(x, y + dir) && board[y + dir][x] === '.')
+                  moves.push({ x, y: y + dir });
+
+               // đi 2 ô ở lượt đầu
+               const startRow = (p === p.toUpperCase()) ? 6 : 1;
+               if (
+                  y === startRow &&
+                  board[y + dir][x] === '.' &&
+                  board[y + dir * 2][x] === '.'
+               ) {
+                  moves.push({ x, y: y + dir * 2 });
+               }
+
+               // ăn chéo
+               for (let dx of [-1, 1]) {
+                  const nx = x + dx, ny = y + dir;
+                  if (
+                     inBoard(nx, ny) &&
+                     board[ny][nx] !== '.' &&
+                     !sameColor(p, board[ny][nx])
+                  ) {
+                     moves.push({ x: nx, y: ny });
+                  }
+               }
+
+               if (enPassantTarget) {
+                  for (let dx of [-1, 1]) {
+                     if (x + dx === enPassantTarget.x && y + dir === enPassantTarget.y) {
+                        moves.push({ x: enPassantTarget.x, y: enPassantTarget.y, enPassant: true });
+                     }
+                  }
+               }
+               break;
+
+            case 'r': // XE
+               lineMoves(x, y, moves, [[1, 0], [-1, 0], [0, 1], [0, -1]]); break;
+            case 'b': // TƯỢNG
+               lineMoves(x, y, moves, [[1, 1], [1, -1], [-1, 1], [-1, -1]]); break;
+            case 'q': // HẬU
+               lineMoves(x, y, moves, [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]); break;
+            case 'n': // MÃ
+               [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]]
+                  .forEach(([dx, dy]) => {
+                     const nx = x + dx, ny = y + dy;
+                     if (inBoard(nx, ny) && (board[ny][nx] === '.' || !sameColor(p, board[ny][nx])))
+                        moves.push({ x: nx, y: ny });
+                  });
+               break;
+            case 'k': // VUA (chưa xét chiếu)
+               for (let dx = -1; dx <= 1; dx++)for (let dy = -1; dy <= 1; dy++) {
+                  if (dx || dy) {
+                     const nx = x + dx, ny = y + dy;
+                     if (inBoard(nx, ny) && (board[ny][nx] === '.' || !sameColor(p, board[ny][nx])))
+                        moves.push({ x: nx, y: ny });
+                  }
+               }
+               const color = p === 'K' ? 'white' : 'black';
+               const y0 = color === 'white' ? 7 : 0;
+
+               // nhập thành cánh vua
+               if (castlingRights[color].king &&
+                  board[y0][5] === '.' && board[y0][6] === '.' &&
+                  !isKingInCheck(color) &&
+                  !squareUnderAttack(5, y0, color) &&
+                  !squareUnderAttack(6, y0, color)) {
+                  moves.push({ x: 6, y: y0 });
+               }
+
+               // nhập thành cánh hậu
+               if (castlingRights[color].queen &&
+                  board[y0][1] === '.' && board[y0][2] === '.' && board[y0][3] === '.' &&
+                  !isKingInCheck(color) &&
+                  !squareUnderAttack(2, y0, color) &&
+                  !squareUnderAttack(3, y0, color)) {
+                  moves.push({ x: 2, y: y0 });
+               }
+               break;
+         }
+         return moves;
+      }
+
+      function squareUnderAttack(x, y, color) {
+         for (let yy = 0; yy < 8; yy++) {
+            for (let xx = 0; xx < 8; xx++) {
+               const p = board[yy][xx];
+               if (p === '.') continue;
+
+               if (
+                  (color === 'white' && p === p.toLowerCase()) ||
+                  (color === 'black' && p === p.toUpperCase())
+               ) {
+                  if (getLegalMoves(xx, yy).some(m => m.x === x && m.y === y))
+                     return true;
+               }
+            }
+         }
+         return false;
+      }
+
+
+      function getSafeMoves(x, y) {
+         const p = board[y][x];
+         const color = p === p.toUpperCase() ? 'white' : 'black';
+         const rawMoves = getLegalMoves(x, y);
+         const safeMoves = [];
+
+         for (const m of rawMoves) {
+            const captured = board[m.y][m.x];
+
+            // giả lập
+            board[m.y][m.x] = p;
+            board[y][x] = '.';
+
+            if (!isKingInCheck(color)) {
+               safeMoves.push(m);
+            }
+
+            // hoàn tác
+            board[y][x] = p;
+            board[m.y][m.x] = captured;
+         }
+
+         return safeMoves;
+      }
+
+      function hasAnyLegalMove(color) {
+         for (let y = 0; y < 8; y++) {
+            for (let x = 0; x < 8; x++) {
+               const p = board[y][x];
+               if (p === '.') continue;
+
+               if (
+                  (color === 'white' && p === p.toUpperCase()) ||
+                  (color === 'black' && p === p.toLowerCase())
+               ) {
+                  if (getSafeMoves(x, y).length > 0) {
+                     return true;
+                  }
+               }
+            }
+         }
+         return false;
+      }
+
+      function isCheckmate(color) {
+         if (!isKingInCheck(color)) return false;
+         return !hasAnyLegalMove(color);
+      }
+
+      function isStalemate(color) {
+         if (isKingInCheck(color)) return false;
+         return !hasAnyLegalMove(color);
+      }
+
+
+
+      function lineMoves(x, y, moves, dirs) {
+         const p = board[y][x];
+         for (let [dx, dy] of dirs) {
+            let nx = x + dx, ny = y + dy;
+            while (inBoard(nx, ny)) {
+               if (board[ny][nx] === '.') {
+                  moves.push({ x: nx, y: ny });
+               } else {
+                  if (!sameColor(p, board[ny][nx])) moves.push({ x: nx, y: ny });
+                  break;
+               }
+               nx += dx; ny += dy;
+            }
+         }
+      }
+
+      function isInsufficientMaterial() {
+         let pieces = [];
+
+         for (let y = 0; y < 8; y++) {
+            for (let x = 0; x < 8; x++) {
+               const p = board[y][x];
+               if (p !== '.') pieces.push(p);
+            }
+         }
+
+         // chỉ còn 2 vua
+         if (pieces.length === 2) return true;
+
+         // vua + mã / tượng vs vua
+         if (pieces.length === 3) {
+            return pieces.some(p =>
+               p.toLowerCase() === 'b' || p.toLowerCase() === 'n'
+            );
+         }
+
+         // vua + tượng vs vua + tượng cùng màu ô
+         if (pieces.length === 4) {
+            const bishops = pieces.filter(p => p.toLowerCase() === 'b');
+            if (bishops.length === 2) {
+               let colors = [];
+
+               for (let y = 0; y < 8; y++) {
+                  for (let x = 0; x < 8; x++) {
+                     if (board[y][x].toLowerCase() === 'b') {
+                        colors.push((x + y) % 2);
+                     }
+                  }
+               }
+
+               return colors.length === 2 && colors[0] === colors[1];
+            }
+         }
+
+         return false;
+      }
+
+
+      function sameColor(a, b) {
+         return (a === a.toUpperCase()) === (b === b.toUpperCase());
+      }
+
+      function inBoard(x, y) { return x >= 0 && x < 8 && y >= 0 && y < 8; }
+
+      // ================== START ==================
+      drawBoard();
+   </script>
+</body>
+
+</html>
