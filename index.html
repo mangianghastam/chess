@@ -62,17 +62,139 @@
          cursor: pointer;
          margin-left: 30px;
       }
+
+      body {
+         margin: 0;
+         font-family: system-ui, sans-serif;
+         background: #1e1e1e;
+         color: #eee;
+         display: flex;
+         justify-content: center;
+         align-items: center;
+         height: 100vh;
+      }
+
+      .app {
+         display: flex;
+         gap: 24px;
+      }
+
+      /* ===== BÀN CỜ ===== */
+      .board {
+         display: grid;
+         grid-template-columns: repeat(8, 64px);
+         grid-template-rows: repeat(8, 64px);
+         border: 4px solid #555;
+      }
+
+      .cell {
+         width: 64px;
+         height: 64px;
+         font-size: 38px;
+         display: flex;
+         align-items: center;
+         justify-content: center;
+         cursor: pointer;
+      }
+
+      .white {
+         background: #f0d9b5;
+      }
+
+      .black {
+         background: #b58863;
+      }
+
+      /* quân được chọn */
+      .selected {
+         outline: 3px solid #00ffcc;
+      }
+
+      /* nước đi hợp lệ */
+      .move {
+         box-shadow: inset 0 0 0 4px rgba(0, 255, 0, 0.6);
+      }
+
+      /* vua bị chiếu */
+      .check {
+         outline: 4px solid red;
+      }
+
+      /* ===== PANEL ===== */
+      .panel {
+         width: 180px;
+         background: #2a2a2a;
+         padding: 16px;
+         border-radius: 10px;
+      }
+
+      .panel h2 {
+         margin-top: 0;
+         text-align: center;
+      }
+
+      .panel button {
+         width: 100%;
+         margin-top: 10px;
+         padding: 8px;
+         font-size: 16px;
+         cursor: pointer;
+      }
+
+      /* ===== MOBILE ===== */
+      @media (max-width: 768px) {
+         body {
+            height: auto;
+            padding: 16px;
+         }
+
+         .app {
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+         }
+
+         /* bàn cờ nhỏ lại */
+         .board {
+            grid-template-columns: repeat(8, 42px);
+            grid-template-rows: repeat(8, 42px);
+            border-width: 3px;
+         }
+
+         .cell {
+            width: 42px;
+            height: 42px;
+            font-size: 26px;
+         }
+
+         /* panel xuống dưới */
+         .panel {
+            width: 100%;
+            max-width: 320px;
+            text-align: center;
+         }
+
+         .panel button {
+            font-size: 15px;
+            padding: 10px;
+         }
+      }
    </style>
 </head>
 
 <body>
-   <div class="game">
-      <div class="board" id="board"></div>
-      
-      <!-- <button id="undoBtn">⟲ Đi lại</button> -->
-   </div>
-   <div class="undo">
-      <button onclick="undoMove()">⏪ Đi lại</button>
+   <div class="app">
+      <div id="board" class="board"></div>
+
+      <div class="panel">
+         <h2>♟ Chess</h2>
+
+         <div id="turnInfo">Lượt: Trắng</div>
+         <div id="statusInfo"></div>
+
+         <button onclick="undoMove()">↩ Đi lại</button>
+         <button onclick="resetGame()">🔄 Reset</button>
+      </div>
    </div>
 
 
@@ -98,6 +220,17 @@
          ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
       ];
 
+      const initialBoard = [
+         ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
+         ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
+         ['.', '.', '.', '.', '.', '.', '.', '.'],
+         ['.', '.', '.', '.', '.', '.', '.', '.'],
+         ['.', '.', '.', '.', '.', '.', '.', '.'],
+         ['.', '.', '.', '.', '.', '.', '.', '.'],
+         ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
+         ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
+      ];
+
       let turn = 'white'; // white | black
       let selected = null;
       let legalMoves = [];
@@ -109,30 +242,9 @@
       let checkedKing = null; // {x, y} hoặc null
       let history = [];
 
-      // function deepCopy(board) {
-      //    return board.map(row => row.slice());
-      // }
+      const turnInfoEl = document.getElementById('turnInfo');
 
-      // // history.push({
-      // //    board: deepCopy(board),
-      // //    turn: turn,
-      // //    checkedKing: checkedKing
-      // // });
 
-      // function undoMove() {
-      //    if (history.length === 0) return;
-
-      //    const last = history.pop();
-      //    board = last.board;
-      //    turn = last.turn;
-      //    checkedKing = last.checkedKing;
-
-      //    selected = null;
-      //    legalMoves = [];
-      //    drawBoard();
-      // }
-
-      // document.getElementById("undoBtn").onclick = undoMove;
 
       function saveState() {
          history.push({
@@ -158,6 +270,20 @@
          selected = null;
          legalMoves = [];
          drawBoard();
+      }
+
+      function updateTurnInfo() {
+         // turnInfoEl.textContent = 'Lượt: ' + (turn === 'white' ? 'Trắng' : 'Đen');
+
+         if (turn === 'white') {
+            turnInfoEl.textContent = '♔ Lượt: Trắng';
+            turnInfoEl.style.color = 'white';
+            turnInfoEl.style.backgroundColor = '#000';
+         } else {
+            turnInfoEl.textContent = '♚ Lượt: Đen';
+            turnInfoEl.style.color = 'black';
+            turnInfoEl.style.backgroundColor = '#fff';
+         }
       }
 
 
@@ -190,6 +316,28 @@
             }
          }
          showPromotionMenu();
+         updateTurnInfo();
+      }
+
+      function resetGame() {
+         // reset bàn cờ
+         board = initialBoard.map(row => [...row]);
+
+         turn = 'white';
+         selected = null;
+         legalMoves = [];
+         promotionPending = null;
+         checkedKing = null;
+
+         castlingRights = {
+            white: { king: true, queen: true },
+            black: { king: true, queen: true }
+         };
+
+         enPassantTarget = null;
+         history = [];
+
+         drawBoard();
       }
 
       function showPromotionMenu() {
