@@ -141,6 +141,24 @@
          cursor: pointer;
       }
 
+      .history {
+         max-height: 200px;
+         overflow-y: auto;
+         background: #000000;
+         padding: 10px;
+         margin-top: 10px;
+         border-radius: 8px;
+         font-size: 14px;
+      }
+
+      .history h3 {
+         margin: 0 0 5px 0;
+      }
+
+      .history li {
+         margin-bottom: 4px;
+      }
+
       /* ===== MOBILE ===== */
       @media (max-width: 768px) {
          body {
@@ -195,7 +213,14 @@
          <button onclick="undoMove()">↩ Đi lại</button>
          <button onclick="resetGame()">🔄 Reset</button>
       </div>
+
+      <div id="moveHistory" class="history">
+         <h3>Lịch sử nước đi</h3>
+         <ol id="historyList"></ol>
+      </div>
+
    </div>
+
 
 
    <script>
@@ -241,6 +266,8 @@
       let enPassantTarget = null;
       let checkedKing = null; // {x, y} hoặc null
       let history = [];
+      let moveHistory = [];
+
 
       const turnInfoEl = document.getElementById('turnInfo');
 
@@ -338,6 +365,43 @@
          history = [];
 
          drawBoard();
+         moveHistory = [];
+         renderHistory();
+      }
+
+      function coordToChess(x, y) {
+         const files = 'abcdefgh';
+         return files[x] + (8 - y);
+      }
+
+      function recordMove(fromX, fromY, toX, toY, piece) {
+         const from = coordToChess(fromX, fromY);
+         const to = coordToChess(toX, toY);
+         const side = piece === piece.toUpperCase() ? 'Trắng' : 'Đen';
+
+         moveHistory.push({
+            side,
+            text: `${from} → ${to}`
+         });
+
+         renderHistory();
+      }
+
+      function renderHistory() {
+         const list = document.getElementById('historyList');
+         list.innerHTML = '';
+
+         moveHistory.forEach((m, i) => {
+            const li = document.createElement('li');
+
+            if (m.side === 'Trắng') {
+               li.textContent = `${Math.floor(i / 2) + 1}. ${m.side}: ${m.text}`;
+            } else {
+               li.textContent = `… ${m.side}: ${m.text}`;
+            }
+
+            list.appendChild(li);
+         });
       }
 
       function showPromotionMenu() {
@@ -386,7 +450,13 @@
          if (selected) {
             if (legalMoves.some(m => m.x === x && m.y === y)) {
 
+               // 👉 LƯU QUÂN TRƯỚC KHI ĐI
+               const movedPiece = board[selected.y][selected.x];
+
                movePiece(selected.x, selected.y, x, y);
+
+               // 👉 GHI LỊCH SỬ NƯỚC ĐI (THIẾU DÒNG NÀY!)
+               recordMove(selected.x, selected.y, x, y, movedPiece);
 
                // ====== NẾU KHÔNG PHONG QUÂN ======
                if (!promotionPending) {
@@ -434,7 +504,9 @@
             legalMoves = getSafeMoves(x, y);
          }
 
+
          drawBoard();
+         renderHistory();
       }
 
 
